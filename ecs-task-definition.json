@@ -1,0 +1,67 @@
+{
+  "family": "bookorder-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "bookorder-backend",
+      "image": "YOUR_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/bookorder-backend:latest",
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "essential": true,
+      "environment": [
+        {
+          "name": "ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "DATABASE_URL",
+          "value": "postgresql://your-supabase-connection-string"
+        },
+        {
+          "name": "INFOBIP_API_KEY",
+          "value": "your-infobip-api-key"
+        },
+        {
+          "name": "INFOBIP_BASE_URL",
+          "value": "your-base-url.api.infobip.com"
+        },
+        {
+          "name": "INFOBIP_APP_ID",
+          "value": "your-application-id"
+        },
+        {
+          "name": "INFOBIP_MESSAGE_ID",
+          "value": "your-message-template-id"
+        },
+        {
+          "name": "ALLOWED_ORIGINS",
+          "value": "https://your-cloudfront-domain.cloudfront.net"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/bookorder-backend",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
