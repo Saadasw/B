@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  bookorder-backend:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - INFOBIP_API_KEY=${INFOBIP_API_KEY}
+      - INFOBIP_BASE_URL=${INFOBIP_BASE_URL}
+      - INFOBIP_APP_ID=${INFOBIP_APP_ID}
+      - INFOBIP_MESSAGE_ID=${INFOBIP_MESSAGE_ID}
+      - ENVIRONMENT=development
+      - ALLOWED_ORIGINS=*
+    volumes:
+      - .:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
