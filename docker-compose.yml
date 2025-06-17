@@ -6,6 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - DATABASE_URL=${DATABASE_URL}
       - INFOBIP_API_KEY=${INFOBIP_API_KEY}
       - INFOBIP_BASE_URL=${INFOBIP_BASE_URL}
       - INFOBIP_APP_ID=${INFOBIP_APP_ID}
