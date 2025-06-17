@@ -1,4 +1,4 @@
-name: Deploy to EC2
+name: Deploy to EC2 (Simple)
 
 on:
   push:
@@ -15,37 +15,8 @@ jobs:
 
     - name: Create deployment package
       run: |
-        mkdir -p deploy
-        cp -r . deploy/
-        cd deploy
-        # Create docker-compose.yml for production
-        cat > docker-compose.yml << EOF
-        version: '3.8'
-        services:
-          bookorder-backend:
-            build: .
-            ports:
-              - "8000:8000"
-            environment:
-              - DATABASE_URL=${{ secrets.DATABASE_URL }}
-              - INFOBIP_API_KEY=${{ secrets.INFOBIP_API_KEY }}
-              - INFOBIP_BASE_URL=${{ secrets.INFOBIP_BASE_URL }}
-              - INFOBIP_APP_ID=${{ secrets.INFOBIP_APP_ID }}
-              - INFOBIP_MESSAGE_ID=${{ secrets.INFOBIP_MESSAGE_ID }}
-              - ENVIRONMENT=production
-            restart: unless-stopped
-            healthcheck:
-              test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-              interval: 30s
-              timeout: 10s
-              retries: 3
-              start_period: 40s
-        EOF
-
-    - name: Create deployment archive
-      run: |
-        cd deploy
-        tar -czf ../deployment.tar.gz .
+        # Create a clean deployment package
+        tar --exclude='.git' --exclude='node_modules' --exclude='.env' -czf deployment.tar.gz .
 
     - name: Copy files to EC2
       uses: appleboy/scp-action@v0.1.4
@@ -56,38 +27,63 @@ jobs:
         source: "deployment.tar.gz"
         target: "/home/ec2-user/"
 
-    - name: Deploy on EC2
+    - name: Deploy to EC2
       uses: appleboy/ssh-action@v1.0.0
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USER }}
         key: ${{ secrets.EC2_KEY }}
         script: |
+          # Install Git and Docker if not already installed
+          sudo yum update -y
+          sudo yum install -y git docker
+          sudo systemctl start docker
+          sudo systemctl enable docker
+          sudo usermod -a -G docker ec2-user
+          
+          # Fix Docker permissions
+          sudo chmod 666 /var/run/docker.sock
+          
+          # Install Docker Compose if not exists
+          if ! command -v docker-compose &> /dev/null; then
+            sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+          
           # Create deployment directory
           mkdir -p /home/ec2-user/bookorder-app
           
-          # Extract files
+          # Extract new files
           cd /home/ec2-user
-          tar -xzf deployment.tar.gz -C bookorder-app --strip-components=1
-          
-          # Navigate to app directory
+          tar -xzf deployment.tar.gz -C bookorder-app --strip-components=0
           cd /home/ec2-user/bookorder-app
           
+          # Create production environment file
+          cat > .env << EOF
+          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          INFOBIP_API_KEY=${{ secrets.INFOBIP_API_KEY }}
+          INFOBIP_BASE_URL=${{ secrets.INFOBIP_BASE_URL }}
+          INFOBIP_APP_ID=${{ secrets.INFOBIP_APP_ID }}
+          INFOBIP_MESSAGE_ID=${{ secrets.INFOBIP_MESSAGE_ID }}
+          ENVIRONMENT=production
+          ALLOWED_ORIGINS=*
+          EOF
+          
           # Stop existing containers
-          docker-compose down || true
+          sudo docker-compose down || true
           
           # Remove old images to save space
-          docker system prune -f || true
+          sudo docker system prune -f || true
           
           # Build and start new containers
-          docker-compose up -d --build
+          sudo docker-compose up -d --build
           
-          # Check if container is running
-          sleep 10
-          docker-compose ps
-          
-          # Test health endpoint
-          curl -f http://localhost:8000/health || echo "Health check failed"
+          # Wait and check health
+          sleep 15
+          echo "=== Container Status ==="
+          sudo docker-compose ps
+          echo "=== Health Check ==="
+          curl -f http://localhost:8000/health || echo "Health check failed - app might still be starting"
           
           # Clean up
           rm -f /home/ec2-user/deployment.tar.gz
