@@ -1,0 +1,93 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r . deploy/
+        cd deploy
+        # Create docker-compose.yml for production
+        cat > docker-compose.yml << EOF
+        version: '3.8'
+        services:
+          bookorder-backend:
+            build: .
+            ports:
+              - "8000:8000"
+            environment:
+              - DATABASE_URL=${{ secrets.DATABASE_URL }}
+              - INFOBIP_API_KEY=${{ secrets.INFOBIP_API_KEY }}
+              - INFOBIP_BASE_URL=${{ secrets.INFOBIP_BASE_URL }}
+              - INFOBIP_APP_ID=${{ secrets.INFOBIP_APP_ID }}
+              - INFOBIP_MESSAGE_ID=${{ secrets.INFOBIP_MESSAGE_ID }}
+              - ENVIRONMENT=production
+            restart: unless-stopped
+            healthcheck:
+              test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+              interval: 30s
+              timeout: 10s
+              retries: 3
+              start_period: 40s
+        EOF
+
+    - name: Create deployment archive
+      run: |
+        cd deploy
+        tar -czf ../deployment.tar.gz .
+
+    - name: Copy files to EC2
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_KEY }}
+        source: "deployment.tar.gz"
+        target: "/home/ec2-user/"
+
+    - name: Deploy on EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_KEY }}
+        script: |
+          # Create deployment directory
+          mkdir -p /home/ec2-user/bookorder-app
+          
+          # Extract files
+          cd /home/ec2-user
+          tar -xzf deployment.tar.gz -C bookorder-app --strip-components=1
+          
+          # Navigate to app directory
+          cd /home/ec2-user/bookorder-app
+          
+          # Stop existing containers
+          docker-compose down || true
+          
+          # Remove old images to save space
+          docker system prune -f || true
+          
+          # Build and start new containers
+          docker-compose up -d --build
+          
+          # Check if container is running
+          sleep 10
+          docker-compose ps
+          
+          # Test health endpoint
+          curl -f http://localhost:8000/health || echo "Health check failed"
+          
+          # Clean up
+          rm -f /home/ec2-user/deployment.tar.gz
